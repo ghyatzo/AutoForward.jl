@@ -3,65 +3,7 @@ using InteractiveUtils
 using MacroTools
 using Combinatorics
 
-export AbstractPolygon, Polygon, RegularPolygon, vertices, coords_x, coords_y,
-    side, area, @derive
-
-abstract type AbstractPolygon end
-
-mutable struct Polygon <: AbstractPolygon
-    x::Vector{Float64}
-    y::Vector{Float64}
-end
-
-# Retrieve the number of vertices, and their X and Y coordinates
-vertices(p::Polygon) = length(p.x)
-coords_x(p::Polygon) = p.x
-coords_y(p::Polygon) = p.y
-
-mutable struct RegularPolygon <: AbstractPolygon
-    p::Polygon
-    radius::Float64
-end
-
-function RegularPolygon(n::Integer, radius::Real)
-    @assert n >= 3
-    θ = range(0, stop=2pi - (2pi / n), length=n)
-    c = radius .* exp.(im .* θ)
-    return RegularPolygon(Polygon(real(c), imag(c)), radius)
-end
-
-# Extended methods only applicable to a Regular Polygon
-# Compute length of a side and the polygon area
-side(p::RegularPolygon) = 2 * p.radius * sin(pi / vertices(p))
-area(p::RegularPolygon) = side(p)^2 * vertices(p) / 4 / tan(pi / vertices(p))
-
-### EXTENSIONS TO AUTOMATE
-vertices(p::RegularPolygon) = vertices(p.p)
-coords_x(p::RegularPolygon) = coords_x(p.p)
-coords_y(p::RegularPolygon) = coords_y(p.p)
-###
-
-# ---- ADDING ANOTHER LAYER!!
-
-struct StrangeName
-    name::String
-end
-name(s::StrangeName) = "Spooooky: $s"
-
-mutable struct StrangePolygon <: AbstractPolygon
-    P::RegularPolygon
-    name::StrangeName
-end
-
-### METHODS TO EXTEND!
-vertices(p::StrangePolygon) = vertices(p.p)
-coords_x(p::StrangePolygon) = coords_x(p.p)
-coords_y(p::StrangePolygon) = coords_y(p.p)
-
-side(p::StrangePolygon) = side(p.p)
-area(p::StrangePolygon) = area(p.p)
-
-name(s::StrangePolygon) = name(s.name)
+export @derive
 
 ## Useful stuff
 # methodswith(type, [Module], supertype=false) -> returns a list of methods with a specified type
@@ -250,7 +192,7 @@ function isvalid_pair(e::Expr)
         e.args[3] isa QuoteNode
 end
 
-panic(msg) = throw(ArgumentError(msg))
+@noinline panic(msg) = throw(ArgumentError(msg))
 type_not_in_struct(type) = panic("The type $type is not present in the struct.")
 field_not_in_struct(field) = panic("The field $field is not present in the struct.")
 
@@ -296,9 +238,10 @@ function expand_to_pairs(T, fieldnames, fieldtypes)
     # check for ambiguity
     type_count = Dict{Symbol,Int}()
     for e in T
-        e isa Symbol || continue
-        e in fieldtypes || type_not_in_struct(e)
-        type_count[e] = get(type_count, e, 0) + 1
+        if e isa Symbol
+            e in fieldtypes || type_not_in_struct(e)
+            type_count[e] = get(type_count, e, 0) + 1
+        end
     end
 
     for k in keys(type_count)
@@ -314,23 +257,23 @@ function expand_to_pairs(T, fieldnames, fieldtypes)
     # match fields
     type_indexes = Dict(k => 1 for k in keys(type_count))
     expanded_pairs = ntuple(length(T)) do i
-        e = T[i]
+        ex = T[i]
 
-        if e isa Symbol
-            e in fieldtypes || type_not_in_struct(e)
-            # match fields in order of appearance in the struct
-            type_indexes[e] = findnext(isequal(e), fieldtypes, type_indexes[e]) + 1
-            matching_field = fieldnames[type_indexes[e]-1]
-            return Expr(:call, :(=>), e, QuoteNode(matching_field))
-        elseif isvalid_pair(e)
-            (e.args[2] in fieldtypes) || type_not_in_struct(e.args[2])
-            (e.args[3].value in fieldnames) || field_not_in_struct(e.args[3])
-            return e
+        if ex isa Symbol
+            S = ex
+            type_indexes[S] = findnext(isequal(S), fieldtypes, type_indexes[S]) + 1
+            f = fieldnames[type_indexes[S]-1]
+        elseif isvalid_pair(ex)
+            S = ex.args[2]
+            f = ex.args[3].value
         end
+        S in fieldtypes || type_not_in_struct(S)
+        f in fieldnames || field_not_in_struct(f)
+        return Expr(:call, :(=>), S, QuoteNode(f))
 
     end
 
-    expanded_pairs
+    return expanded_pairs
 end
 
 macro derive(args...)
@@ -345,13 +288,8 @@ function derive(_module_, T, S)
         Sfields__
     end) || error("Needs to be a struct.")
 
-    if @capture(Sdef, S_t_ <: S_sup_)
-        Stype = S_t
-    else
-        Stype = Sdef
-    end
+    Stype = @capture(Sdef, S_t_ <: S_sup_) ? S_t : Sdef
 
-    @show Sfields
     fieldtypes = []
     fieldnames = []
     for expr in Sfields
@@ -361,26 +299,26 @@ function derive(_module_, T, S)
         push!(fieldtypes, ft)
         push!(fieldnames, fn)
     end
-    @show fieldtypes
-    @show fieldnames
+
     derive_pairs = expand_to_pairs(parse_braces(T), fieldnames, fieldtypes)
-    @show derive_pairs
     evaldpairs = [Core.eval(_module_, d) for d in derive_pairs]
-    @info evaldpairs
     sig = first.(evaldpairs)
-    @show sig
 
     # builds a set of methods that contain our signature:
     # 1. first, get a set of methods that contain at least all our types singularly
-    meths_1 = intersect(Set.(methodswith.(sig))...)
+    # !! We limit the search to the current module for now
+    candidate_methods = intersect(Set.(methodswith.(sig, (_module_,)))...)
 
     # 2. filter all the methods that have less than the number of types in our signature
-    meths_2 = filter(m -> m.nargs > length(sig), meths_1)
+    filter!(m -> m.nargs > length(sig), candidate_methods)
+
+    # 3. remove constructors from the methods to derive
+    filter!(m -> getfield(_module_, m.name) isa Function, candidate_methods)
 
     # 3. Scan the signature and discard all methods that do not contain the correct
     # order. At the same time, match the matching positions with the method.
-    meths_3 = Dict()
-    for m in meths_2
+    allmethods = Dict()
+    for m in candidate_methods
         msig = fieldtype.(m.sig, collect(2:m.nargs))
         sigwidth = length(sig) - 1
 
@@ -390,16 +328,17 @@ function derive(_module_, T, S)
                 push!(positions, i:i+sigwidth)
             end
         end
-
-        meths_3[m] = positions
+        if !isempty(positions)
+            allmethods[m] = positions
+        end
     end
 
     # Use: Base.arg_decl_parts(method) to deconstruct the method signature
     # such that to keep the typevar information: x<:T y<:T where T<:...
 
     # generate the new signatures
-    genmethods = []
-    for (m, swap_positions) in meths_3
+    methods_to_generate = []
+    for (m, swap_positions) in allmethods
         tv, decl, _... = Base.arg_decl_parts(m)
         argnames = [Symbol(d[1]) for d in decl[2:end]]
         argtypes = [Symbol(d[2]) for d in decl[2:end]]
@@ -407,32 +346,36 @@ function derive(_module_, T, S)
         for positions in combinations(swap_positions)
             # newsiglen = (length(decl) - 1) - sum(length.(positions) .- 1)
 
-            # TODO: deal with typevars
             argnameswaps = [gensym(Stype) for _ in 1:length(positions)]
             argtypesswaps = fill(Stype, length(positions))
 
-            sendargnames = swapat(argnames, positions, argnameswaps)
-            sendargtypes = swapat(argtypes, positions, argtypesswaps)
+            newargnames = swapat(argnames, positions, argnameswaps)
+            newargtypes = swapat(argtypes, positions, argtypesswaps)
 
-            senddecl = collect(zip(sendargnames, sendargtypes))
+            newdecl = collect(zip(newargnames, newargtypes))
 
-            # For each element of our new type, we expand into the pattern, following the derive_pairs
-            # @info gennewsig(m, senddecl)
-            # @info gensplatsig(m, Stype, senddecl, derive_pairs)
-            ex = :($(gennewsig(m, senddecl)) = $(gensplatsig(m, Stype, senddecl, evaldpairs)))
-            @info ex
-            push!(genmethods, ex)
+            newsignature = generate_signature(m, newdecl)
+            if !isempty(tv)
+                # filter the tv to remove the typevars we substituted
+                newtv = filter(tvar -> tvar.name in newargtypes, tv)
+                newsignature = Expr(:where, newsignature, newtv...)
+            end
+            methodforwardcall = generate_forward_call(m, Stype, newdecl, evaldpairs)
+
+            ex = Expr(:(=), newsignature, methodforwardcall)
+            # @info ex
+            push!(methods_to_generate, ex)
         end
     end
 
     retblk = Expr(:block)
     push!(retblk.args, S)
-    for gm in genmethods
+    for gm in methods_to_generate
         push!(retblk.args, gm)
     end
 
     @show esc(retblk)
-    # return esc(retblk)
+    return esc(retblk)
 end
 
 function swapat(base, positions, swaps)
@@ -460,7 +403,7 @@ function swapat(base, positions, swaps)
     return swapped
 end
 
-function gennewsig(method, decl)
+function generate_signature(method, decl)
     mexpr = Expr(:call, method.name)
     for (argn, argt) in decl
         push!(mexpr.args, Expr(:(::), argn, argt))
@@ -468,7 +411,7 @@ function gennewsig(method, decl)
     return mexpr
 end
 
-function gensplatsig(method, deriveT, decl, derivepairs)
+function generate_forward_call(method, deriveT, decl, derivepairs)
     mname = :($(method.module).$(method.name))
     mexpr = Expr(:call, mname)
     fields = last.(derivepairs)
@@ -484,90 +427,5 @@ function gensplatsig(method, deriveT, decl, derivepairs)
     end
     return mexpr
 end
-
-
-# macro forward(ex, fs)
-#     @capture(ex, T_.field_) || error("Syntax: @forward T.x f, g, h")
-#     T = esc(T)
-#     fs = isexpr(fs, :tuple) ? map(esc, fs.args) : [esc(fs)]
-#     :($([:($f(x::$T, args...; kwargs...) = (Base.@_inline_meta; $f(x.$field, args...; kwargs...)))
-#          for f in fs]...);
-#     nothing)
-# end
-
-function forward(sender::Tuple{Type,Symbol}, receiver::Type, method::Method;
-    withtypes=true, allargs=true)
-    function newmethod(sender_type, sender_symb, argid, method, withtypes, allargs)
-        s = "p" .* string.(1:method.nargs-1)
-        (withtypes) && (s .*= "::" .* string.(fieldtype.(Ref(method.sig), 2:method.nargs)))
-        s[argid] .= "p" .* string.(argid) .* "::$sender_type"
-        if !allargs
-            s = s[1:argid[end]]
-            push!(s, "args...")
-        end
-
-        # Module where the method is defined
-        ff = fieldtype(method.sig, 1)
-        if isabstracttype(ff)
-            # costructors
-            m = string(method.module)
-            # m = string(method.module.eval(:(parentmodule($(method.name)))))  # Constructor
-        else
-            # all methods except constructors
-            m = string(parentmodule(ff))
-        end
-        m *= "."
-        l = "$m:(" * string(method.name) * ")(" * join(s, ", ") * "; kw..."
-        m = string(method.module) * "."
-        l *= ") = $m:(" * string(method.name) * ")("
-        s = "p" .* string.(1:method.nargs-1)
-        if !allargs
-            s = s[1:argid[end]]
-            push!(s, "args...")
-        end
-        s[argid] .= "getfield(" .* s[argid] .* ", :$sender_symb)"
-        l *= join(s, ", ") * "; kw...)"
-        l = join(split(l, "#"))
-        return l
-    end
-
-    @assert isstructtype(sender[1])
-    @assert sender[2] in fieldnames(sender[1])
-    sender_type = string(parentmodule(sender[1])) * "." * string(nameof(sender[1]))
-    sender_symb = string(sender[2])
-    code = Vector{String}()
-
-    # Search for receiver type in method arguments
-    foundat = Vector{Int}()
-    for i in 2:method.nargs
-        argtype = fieldtype(method.sig, i)
-        (sender[1] == argtype) && (return code)
-        if argtype != Any
-            (typeintersect(receiver, argtype) != Union{}) && (push!(foundat, i - 1))
-        end
-    end
-    (length(foundat) == 0) && (return code)
-    if string(method.name)[1] == '@'
-        @warn "Forwarding macros is not yet supported."  # TODO
-        display(method)
-        println()
-        return code
-    end
-
-    for ii in combinations(foundat)
-        push!(code, newmethod(sender_type, sender_symb, ii, method, withtypes, allargs))
-    end
-
-    tmp = split(string(method.module), ".")[1]
-    code = "@eval " .* tmp .* " " .* code .*
-           " # " .* string(method.file) .* ":" .* string(method.line)
-    if (tmp != "Base") &&
-       (tmp != "Main")
-        pushfirst!(code, "using $tmp")
-    end
-    code = unique(code)
-    return code
-end
-
 
 end # module Derive
