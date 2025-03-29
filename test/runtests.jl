@@ -192,5 +192,3 @@ scale!(derivedregpoly, 1)
 @test coords_x(testregpoly) == coords_x(derivedregpoly)
 @test coords_y(testregpoly) == coords_y(derivedregpoly)
 
-
-
