@@ -1,5 +1,5 @@
 using Test
-using Derive
+using AutoForward
 using Statistics
 
 # =-=-= Testing =-=-=
@@ -36,11 +36,11 @@ struct Q end
     ]
     @assert length(patterns) == length(parse_result)
     @testset for (i, pattern) in enumerate(patterns)
-        @test Derive.parse_braces(pattern) == parse_result[i]
+        @test AutoForward.parse_braces(pattern) == parse_result[i]
     end
 
     for i in eachindex(bad_patterns)
-        @test_throws ArgumentError Derive.parse_braces(bad_patterns[i])
+        @test_throws ArgumentError AutoForward.parse_braces(bad_patterns[i])
     end
 end
 # test expanding
@@ -82,11 +82,11 @@ end
 
     @assert length(expand_results) == length(parse_result)
     @testset for (i, pattern) = enumerate(parse_result)
-        @test Derive.expand_to_pairs(pattern, fnames, ftypes) == expand_results[i]
+        @test AutoForward.expand_to_pairs(pattern, fnames, ftypes) == expand_results[i]
     end
 
     @testset for badparse in bad_parses
-        @test_throws ArgumentError Derive.expand_to_pairs(badparse, fnames, ftypes)
+        @test_throws ArgumentError AutoForward.expand_to_pairs(badparse, fnames, ftypes)
     end
 end
 
@@ -160,11 +160,11 @@ function scale!(p::TestRegularPolygon, scale::Real)
 end
 
 # Automatic derivation
-@derive(Polygon,
-    mutable struct RegularPolygon <: AbstractPolygon
-        p::Polygon
-        radius::Float64
-    end)
+@forward Polygon,
+mutable struct RegularPolygon <: AbstractPolygon
+    p::Polygon
+    radius::Float64
+end
 
 function RegularPolygon(n::Integer, radius::Real)
     @assert n >= 3
@@ -191,4 +191,64 @@ scale!(testregpoly, 1)
 scale!(derivedregpoly, 1)
 @test coords_x(testregpoly) == coords_x(derivedregpoly)
 @test coords_y(testregpoly) == coords_y(derivedregpoly)
+
+## Multitype Forward
+method1(a::Int, b::Int) = a + b
+method2(a::Int, b::Int) = a - b
+method3(a::Int, b::Int, c::Int) = a + b + c
+
+@forward {Int, Int} struct Point
+    x::Int
+    y::Int
+end
+
+p = Point(1, 1)
+
+@test method1(p) == 2
+@test method3(1, p) == 3
+@test method3(p, 1) == 3
+
+module AnotherModule
+export testmethod #also work with public
+testmethod(a::Int, b::Int) = a + b + 100
+privatemethod(a::Int, b::Int) = a + b + 200
+end
+
+@forward {Int, Int}, struct Point2
+    x::Int
+    y::Int
+end, (AnotherModule,)
+
+p2 = Point2(1, 1)
+@test testmethod(p2) == 102
+@test_throws MethodError method1(p2)
+
+@forward {Int, Int} struct Point3
+    x::Int
+    y::Int
+end (
+    method1,
+    method3,
+    AnotherModule,
+    AnotherModule.privatemethod
+)
+p3 = Point3(1, 1)
+
+@test method1(p3) == 2
+@test_throws MethodError method2(p3)
+@test method3(1, p3) == 3
+@test method3(p3, 1) == 3
+@test testmethod(p3) == 102
+@test privatemethod(p3) == 202
+
+
+@forward T,
+struct StackedCall
+    t::T
+end (AnotherModule)
+
+@forward T struct CallingSequence
+    t::T
+end, (AnotherModule,)
+
 
