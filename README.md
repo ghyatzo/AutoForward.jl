@@ -1,8 +1,9 @@
-# Generalised API
+# AutoForward.jl
 
 ![lifecycle](https://img.shields.io/badge/lifecycle-experimental-orange.svg)
 [![build](https://github.com/ghyatzo/.jl/workflows/CI/badge.svg)](https://github.com/ghyatzo/.jl/actions?query=workflow%3ACI)
 
+This package exports a single macro `@forward`
 
 ## Basic Usage
 the wrapper will transparently behave as the specified type (if a single symbol)
