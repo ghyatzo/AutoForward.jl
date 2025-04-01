@@ -10,3 +10,5 @@ MacroTools = "1914dd2f-81c6-5fcd-8719-6d5c9610ff09"
 
 [compat]
 julia="1.10"
+Combinatoris = "1"
+InteractiveUtils = "1"
