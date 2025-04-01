@@ -1,5 +1,9 @@
 # Generalised API
 
+![lifecycle](https://img.shields.io/badge/lifecycle-experimental-orange.svg)
+[![build](https://github.com/ghyatzo/.jl/workflows/CI/badge.svg)](https://github.com/ghyatzo/.jl/actions?query=workflow%3ACI)
+
+
 ## Basic Usage
 the wrapper will transparently behave as the specified type (if a single symbol)
 or as a tuple of the the specified types that automatically splats:
@@ -12,19 +16,49 @@ end (<M>)
 ```
 Here `<T>` can be different things:
 
-1. A single type:
-	1. `P => :p ::Pair{DataType, Symbol}`
-	2. `P::DataType`: In this case it is required that the struct `W` has a **single field of type** `P`, then `P` can be univocally made equivalent to `P => :p`
-2. Multiple types surrounded by `{}`:
-	1. a sequence of `Pair{DataType, Symbol}` `{T => :t, P => :p, Q => :q}`
-	2. a sequence of type `{T, P, Q}`: In this case, like above it is required that the struct `W`, for every type in the tuple, has a single field of that type the it is possible to have an unique mapping.
-	3. multiples of the same type in the sequence: `{T, T, T}`, so long as there are exactly that many fields in the struct with that type, otherwise the pair syntax has to be used.
+1. `P => :p`
+2. `P`: In this case, it is required that the struct `W` has a **single field of type** `P`, then `P` can be univocally made equivalent to `P => :p`
+3. `{T => :t, P => :p, Q => :q}`
+4. `{T, P, Q}`: In this case, like above it is required that the struct `W`, for every type in the braces, has a single field of that type then it is possible to have an unique mapping.
+5. `{T, T, T}`, so long as there are exactly that many fields in the struct with that type, otherwise the pair syntax has to be used to resolve ambiguities.
 
 Here `<M>` is an (optional) tuple with two possible different elements
 
-1. method names: `sin`, `cos`, `exp`, ... to extend a specific set of methods
-2. module names: `Base`, `LinearAlgebra`, ... to extend all matching methods withing the specified modules.
-3. if not specified all matching methods in the current module are extended
+1. **method names**: `sin`, `cos`, `exp`, ... to define new methods for specific set of functions. You can specify specific methods inside modules with `Module.function`.
+2. **module names**: `Base`, `LinearAlgebra`, ... to extend all matching methods withing the specified modules.
+3. if not specified all matching methods in the **current module** are forwarded
+
+> [!WARNING]
+> Forwarding over all `Base` is highly discouraged, especially with very generic types like `Int`.
+> Instead opt for specifying the set of strictly necessary functions you desire.
+
+Then the macro will define the struct and then generate forwarding methods
+for the methods that have the specified argument patterns,
+consuming the patterns from left to right.
+(in each signature the ".." represent arguments WITHOUT the pattern `<T>`)
+```
+#= method signature =#                 #= generated methods =#
+m(.., <T>, ..)          --> m(.., W, ..) --> if <T> = P:         m(.., W.p, ..)
+                                         |-> if <T> = P => p2:   m(.., W.p2, ..)
+                                         |-> if <T> = {T, P, Q}: m(.., W.t, W.p, W.q, ..)
+
+m(.., <T>, .., <T>, ..) --> m(.., <T>, .., W, ..)
+                        |-> m(.., W, .., <T>, ..)
+                        |-> m(.., W, .., W, ..)
+```
+Assume the pattern `<T> = {T, T}` and that there is a method `m` with a signature with `m(.., T, T, T, ..)`.
+Then we will only generate the methods:
+
+* `m(.., W, T, ..)`
+* `m(.., T, W, ..)`.
+
+while methods with a `m(.., T, .., T, ..)` will be ignored. This is because if we decouple the ordering
+we will end up with an explosion of methods and avoiding conflicting methods is much harder.
+
+The forwarding is forced to be at the struct level definition to avoid type piracies, since all methods defined
+will be over the newly defined type. If instead forwarding was allowed for already generated types preventing type piracy would become an issue, while this way it is non existent.
+
+
 
 ### Single Type Forwarding Examples:
 ```julia
@@ -32,7 +66,7 @@ Here `<M>` is an (optional) tuple with two possible different elements
 	p::P 	#= p is the only field of type P =#
 	x 	#= untyped fields are simply ignored =#
   	...
-end (method1, method2, method3)
+end (fun1, fun2, fun3) # only forwards the methods associated with the functions `fun1`,`fun2` and `fun3`
 ```
 We can also have multiple `P` in `W` but then we need the extended syntax:
 then, it is clear over which element we want to expand
@@ -41,7 +75,7 @@ then, it is clear over which element we want to expand
 	p1::P
 	p2::P
 	...
-end (Module)
+end MyModule # only forwards on the methods defined in this module.
 ```
 
 or a more concrete example:
@@ -75,7 +109,7 @@ mutable struct RegularPolygon <: AbstractPolygon
 		c = radius .* exp.(im .* θ)
 		return RegularPolygon(Polygon(real(c), imag(c)), radius)
 	end
-end
+end # defaults to the forwarding all methods in the current module.
 
 
 square = RegularPolygon(4, 5)
@@ -96,48 +130,32 @@ same thing with `<T>` being a sequence of types in braces
 	...
 end
 ```
-
-Then the macro will define the struct and then generate forwarding methods
-for the methods that have the specified argument patterns,
-consuming the patterns from left to right
-(in each pattern the ".." represent arguments WITHOUT the pattern `<T>`)
-```
-#= method signature =#                 #= generated methods =#
-m(.., <T>, ..)          --> m(.., W, ..) --> <T> = P:         m(.., W.p, ..)
-                                         |-> <T> = P => p2:   m(.., W.p2, ..)
-                                         |-> <T> = {T, P, Q}: m(.., W.t, W.p, W.q, ..)
-
-m(.., <T>, .., <T>, ..) --> m(.., <T>, .., W, ..)
-                        |-> m(.., W, .., <T>, ..)
-                        |-> m(.., W, .., W, ..)
-```
-Assume the pattern `<T> = {T, T}` and that there is a method `m` with a signature with `m(.., T, T, T, ..)`.
-Then we will only generate the methods:
-
-* `m(.., W, T, ..)`
-* `m(.., T, W, ..)`.
-
-while methods with a `m(.., T, .., T, ..)` will be ignored. This is because if we decouple the ordering
-we will end up with an explosion of methods and avoiding conflicting methods is much harder.
-
-#### Use case:
+and with a more concrete example
 ```julia
 @forward {Int, Int} struct Point2
 	x::Int
 	y::Int
 end
 
-@forward {Int, Int, Int} struct Point3
+@forward {Int, Int, Int},
+struct Point3
 	x::Int
 	y::Int
 	x::Int
 end
 
+method1(a::Int, b::Int) = a + b
+method2(a::Int, b::Int, c::Int) = a + b + c
+```
+will result in the generation of these methods:
+```
 method1(a::Int, b::Int)             --> method1(Point2) = method1(Point2.x, Point2.y)
+
 method2(a::Int, b::Int, depth::Int) --> method2(Point2, depth) = method2(Point2.x, Point2.y, depth)
                                     |-> method2(a, Point2) = method2(a, Point2.x, Point2.y)
                                     |-> method2(Point3) = method2(Point3.x, Point3.y, Point3.z)
 ```
+
 More complex and arbitrary calls such as `method2(Point2.x, b, Point2.y)` can be defined manually on a case by case basis.
 Defining a rule for such arbitrary cases would require making assumptions on the signature of any method, which in principle can have an arbitrary signature, and it is not really possible to enforce it.
 
@@ -151,7 +169,7 @@ simple cases like:
 	q::Float64
 end
 ```
-But:
+break down since:
 ```
 m1(Int, Int) -> m1(W, W) -----|
                               |--> m1(W.p, W.p) or m1(W.p, W.q)? Undecidable.
