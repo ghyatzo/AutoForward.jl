@@ -72,6 +72,7 @@ function expand_to_pairs(T, fieldnames, fieldtypes)
             f = ex.args[3].value
         end
         S in fieldtypes || type_not_in_struct(S)
+        S == :Any && panic("Can't forward fields of type `Any`.")
         f in fieldnames || field_not_in_struct(f)
         return Expr(:call, :(=>), S, QuoteNode(f))
 
