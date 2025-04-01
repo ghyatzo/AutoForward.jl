@@ -36,7 +36,7 @@ Then the macro will define the struct and then generate forwarding methods
 for the methods that have the specified argument patterns,
 consuming the patterns from left to right.
 (in each signature the ".." represent arguments WITHOUT the pattern `<T>`)
-```
+```jl
 #= method signature =#                 #= generated methods =#
 m(.., <T>, ..)          --> m(.., W, ..) --> if <T> = P:         m(.., W.p, ..)
                                          |-> if <T> = P => p2:   m(.., W.p2, ..)
@@ -148,7 +148,7 @@ method1(a::Int, b::Int) = a + b
 method2(a::Int, b::Int, c::Int) = a + b + c
 ```
 will result in the generation of these methods:
-```
+```julia
 method1(a::Int, b::Int)             --> method1(Point2) = method1(Point2.x, Point2.y)
 
 method2(a::Int, b::Int, depth::Int) --> method2(Point2, depth) = method2(Point2.x, Point2.y, depth)
