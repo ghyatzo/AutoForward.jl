@@ -21,7 +21,7 @@ Here `<T>` can be different things:
 2. `P`: In this case, it is required that the struct `W` has a **single field of type** `P`, then `P` can be univocally made equivalent to `P => :p`
 3. `{T => :t, P => :p, Q => :q}`
 4. `{T, P, Q}`: In this case, like above it is required that the struct `W`, for every type in the braces, has a single field of that type then it is possible to have an unique mapping.
-5. `{T, T, T}`, so long as there are exactly that many fields in the struct with that type, otherwise the pair syntax has to be used to resolve ambiguities.
+	* `{T, T, T}`, so long as there are exactly that many fields in the struct with that type, otherwise the pair syntax has to be used to resolve ambiguities.
 
 Here `<M>` is an (optional) tuple with two possible different elements
 
