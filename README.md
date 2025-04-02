@@ -13,8 +13,8 @@ Similar packages:
 
 ToDo:
 
-- [] Parametric types in patterns (i.e: @forward Array{T, N} struct ...)
-- [] Keyword arguments forwarding
+- [ ] Parametric types in patterns (i.e: @forward Array{T, N} struct ...)
+- [ ] Keyword arguments forwarding
 
 ## Basic Usage
 the wrapper will transparently behave as the specified type (if a single symbol)

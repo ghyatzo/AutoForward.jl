@@ -213,6 +213,7 @@ export testmethod #also work with public
 testmethod(a::Int, b::Int) = a + b + 100
 privatemethod(a::Int, b::Int) = a + b + 200
 end
+using .AnotherModule
 
 @forward {Int, Int}, struct Point2
     x::Int
@@ -239,7 +240,7 @@ p3 = Point3(1, 1)
 @test method3(1, p3) == 3
 @test method3(p3, 1) == 3
 @test testmethod(p3) == 102
-@test privatemethod(p3) == 202
+@test AnotherModule.privatemethod(p3) == 202
 
 
 @forward T,
