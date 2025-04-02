@@ -44,7 +44,6 @@ function parse_braces(T)
 end
 
 function expand_to_pairs(T, fieldnames, fieldtypes)
-    @info T fieldnames fieldtypes
     # check for ambiguity
     type_count = Dict{Any,Int}()
     for e in T
@@ -69,7 +68,6 @@ function expand_to_pairs(T, fieldnames, fieldtypes)
     type_indexes = Dict(k => 1 for k in keys(type_count))
     expanded_pairs = ntuple(length(T)) do i
         ex = T[i]
-        @show ex
         if isvalid_type(ex)
             S = ex
             key = isexpr(ex, :where) ? ex.args[1] : ex
@@ -81,7 +79,6 @@ function expand_to_pairs(T, fieldnames, fieldtypes)
             f = ex.args[3].value
             notunionall_S in fieldtypes || type_not_in_struct(S)
         end
-        S == :Any && panic("Can't forward fields of type `Any`.")
         f in fieldnames || field_not_in_struct(f)
         return Expr(:call, :(=>), S, QuoteNode(f))
 
@@ -141,6 +138,8 @@ function forward(_module_, @nospecialize(T), @nospecialize(S), @nospecialize(M))
         push!(fieldtypes, ft)
         push!(fieldnames, fn)
     end
+
+    @info Stype T fieldnames fieldtypes
 
     @capture(M, (filters__,)) || panic("Specific functions or modules must be in a tuple.")
     materialized_filters = []
@@ -291,8 +290,9 @@ function forward(_module_, @nospecialize(T), @nospecialize(S), @nospecialize(M))
         push!(retblk.args, gm)
     end
 
-    @show esc(retblk)
-    return esc(retblk)
+    # @show esc(retblk)
+    # return esc(retblk)
+    return nothing
 end
 
 function swapat(base, positions, swaps)
