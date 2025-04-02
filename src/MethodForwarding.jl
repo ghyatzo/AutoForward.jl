@@ -173,7 +173,9 @@ function forward(_module_, @nospecialize(T), @nospecialize(S), @nospecialize(M))
     evaldpairs = [Core.eval(_module_, d) for d in derive_pairs]
     @info evaldpairs
     sig = first.(evaldpairs)
-    @info sig sig[1]
+    if any(s == Any for s in sig)
+        panic("Can't forward over Any.")
+    end
 
     # builds a set of methods that contain our signature:
     # 1. first, get a set of methods that contain at least all our types singularly
