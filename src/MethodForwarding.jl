@@ -239,7 +239,7 @@ function forward(_module_, @nospecialize(T), @nospecialize(S), @nospecialize(M))
             newargnames = swapat(argnames, positions, argnameswaps)
             newargtypes = swapat(argtypes, positions, argtypesswaps)
 
-            newdecl = collect(zip(newargnames, newargtypes))
+            newdecl = zip(newargnames, newargtypes)
 
             if !isempty(tv)
                 # filter the tv to remove the typevars we substituted
@@ -248,32 +248,28 @@ function forward(_module_, @nospecialize(T), @nospecialize(S), @nospecialize(M))
                 newtv = []
             end
 
+            # TODO: Properly deal with multiple parametric signature
+            # for each unionall in the signature we desire
+            # extract and save the typevariables
+            sigtvs = []
+            for typ in sig
+                typ isa UnionAll || continue
+                tvs = Base.unwrap_unionall(typ).parameters
+                for tv in tvs
+                    tv isa TypeVar && push!(sigtvs, tv)
+                end
+            end
+            push!(newtv, sigtvs...)
+
             # we need to add the tv variants for the
             # remaining parameters of the struct
             if isexpr(Stype, :curly)
                 params = Stype.args[2:end]
-                #TODO: multiple signatures
-                if sig[1] isa UnionAll
-                    sigtvs = [p.name for p in Base.unwrap_unionall(sig[1]).parameters]
-                else
-                    sigtvs = []
-                end
-                paramtv = [TypeVar(p) for p in params if p ∉ sigtvs]
+                paramtv = [TypeVar(p) for p in params if p ∉ getfield.(sigtvs, :name)]
                 push!(newtv, paramtv...)
             end
-            # for each unionall in the signature we desire
-            # extract and save the typevariables
-            for typ in sig
-                typ isa UnionAll || continue
-                typ = Base.unwrap_unionall(typ)
-                tvs = typ.parameters
-                for tv in tvs
-                    tv isa TypeVar && push!(newtv, tv)
-                end
-            end
+
             newsignature = generate_signature(m, newdecl, newtv)
-            @info m newsignature
-            # Meta.dump(newsignature)
             methodforwardcall = generate_forward_call(m, Stype, newdecl, evaldpairs)
 
             methodforwardcall == Symbol("#skip#") && continue
@@ -289,9 +285,10 @@ function forward(_module_, @nospecialize(T), @nospecialize(S), @nospecialize(M))
 
         push!(retblk.args, gm)
     end
+    @info "All methods" methods_to_generate
 
     # @show esc(retblk)
-    # return esc(retblk)
+    return esc(retblk)
     return nothing
 end
 
