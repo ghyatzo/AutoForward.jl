@@ -320,21 +320,42 @@ function swapat(base, positions, swaps)
     return swapped
 end
 
-function generate_signature(method, decl)
-    mname = :($(method.module).$(method.name))
-    mexpr = Expr(:call, mname)
+function typevar_to_ast(tv)
+    if tv.lb == Union{} && tv.ub != Any
+        ex = Expr(:(<:), tv.name, tv.ub)
+    elseif tv.lb != Union{} && tv.ub == Any
+        ex = Expr(:(<:), tv.lb, tv.name)
+    elseif tv.lb != Union{} && tv.ub != Any
+        ex = Expr(:comparison, tv.lb, :(<:), tv.name, :(<:), tv.ub)
+    else
+        ex = tv.name
+    end
+    return ex
+end
+
+function generate_signature(method, decl, typevars=[])
+    mmodule = method.module
+    mname = method.name
+    mexpr = Expr(:call, :($mmodule.$mname))
     for (argn, argt) in decl
         ex = argn == Symbol("#unused#") ?
              Expr(:(::), argt) : Expr(:(::), argn, argt)
 
         push!(mexpr.args, ex)
     end
+    if !isempty(typevars)
+        mexpr = Expr(:where, mexpr)
+        for tv in typevars
+            push!(mexpr.args, typevar_to_ast(tv))
+        end
+    end
     return mexpr
 end
 
 function generate_forward_call(method, forward_t, decl, derivepairs)
-    mname = :($(method.module).$(method.name))
-    mexpr = Expr(:call, mname)
+    mmodule = method.module
+    mname = method.name
+    mexpr = Expr(:call, :($mmodule.$mname))
     fields = last.(derivepairs)
     for (argn, argt) in decl
         if argt == forward_t
