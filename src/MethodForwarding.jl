@@ -221,10 +221,16 @@ function forward(_module_, @nospecialize(T), @nospecialize(S), @nospecialize(M))
     argnametag = isexpr(Stype, :curly) ? Stype.args[1] : Stype
     methods_to_generate = []
     for (m, swap_positions) in allmethods
-        tv, decl, _... = Base.arg_decl_parts(m)
-        @info tv decl
+        msig = m.sig
+        tv = []
+        while msig isa UnionAll
+            push!(tv, msig.var)
+            msig = msig.body
+        end
+        # tv, decl, _... = Base.arg_decl_parts(m)
+
         argnames = Base.method_argnames(m)[2:end]
-        argtypes = [Symbol(d[2]) for d in decl[2:end]]
+        argtypes = fieldtype.(m.sig, collect(2:m.nargs))
         for positions in combinations(swap_positions)
             ranges_overlap_pairwise(sort!(positions)) && continue
 
