@@ -13,7 +13,10 @@ Similar packages:
 
 ToDo:
 
-- [ ] Parametric types in patterns (i.e: @forward Array{T, N} struct ...)
+- [x] Single Parametric types in patterns
+	(i.e: `@forward Array{T, N} where {T,N} struct ...`)
+- [ ] Multiple Parametric types in patterns
+	(i.e.: `@forward {Vector{T} where T <: Integer, Vector{N} where N <: Float64}`)
 - [ ] Keyword arguments forwarding
 
 ## Basic Usage
@@ -30,6 +33,7 @@ Here `<T>` can be different things:
 
 1. `P => :p`
 2. `P`: In this case, it is required that the struct `W` has a **single field of type** `P`, then `P` can be univocally made equivalent to `P => :p`
+	* `P{T, S} where {T <: C, S <: Q}`: parametric types are supported. Make sure you are using the same symbols as those defined within the struct. The stuct must have the correct type parameters and a field matching the one specified.
 3. `{T => :t, P => :p, Q => :q}`
 4. `{T, P, Q}`: In this case, like above it is required that the struct `W`, for every type in the braces, has a single field of that type then it is possible to have an unique mapping.
 	* `{T, T, T}`, so long as there are exactly that many fields in the struct with that type, otherwise the pair syntax has to be used to resolve ambiguities.
@@ -45,8 +49,9 @@ Here `<M>` is an (optional) tuple with two possible different elements
 > Instead opt for specifying the set of strictly necessary functions you desire.
 
 Then the macro will define the struct and then generate forwarding methods
-for the methods that have the specified argument patterns,
-consuming the patterns from left to right.
+for the methods that have the specified argument patterns, consuming the patterns from left to right.
+It is not possible to forward on the type `Any`, and similarly any argument typed `Any` in a method will be ignored.
+
 (in each signature the ".." represent arguments WITHOUT the pattern `<T>`)
 ```jl
 #= method signature =#                 #= generated methods =#
@@ -88,7 +93,8 @@ then, it is clear over which element we want to expand
 end MyModule # only forwards on the methods defined in this module.
 ```
 
-or a more concrete example:
+or a more concrete example (taken from [ReusePatterns.jl](https://github.com/gcalderone/ReusePatterns.jl)
+):
 ```jl
 abstract type AbstractPolygon end
 
@@ -168,20 +174,3 @@ method2(a::Int, b::Int, depth::Int) --> method2(Point2, depth) = method2(Point2.
 
 More complex and arbitrary calls such as `method2(Point2.x, b, Point2.y)` can be defined manually on a case by case basis.
 Defining a rule for such arbitrary cases would require making assumptions on the signature of any method, which in principle can have an arbitrary signature, and it is not really possible to enforce it.
-
-## Multiple Forwarding
-I've breifly explored the idea of having simultaneously forward a type as two different types. But even
-simple cases like:
-```julia
-#= we want W to forward both as an Int and as a Float64 =#
-@forward [Int, Float64] struct W
-	p::Int
-	q::Float64
-end
-```
-break down since:
-```
-m1(Int, Int) -> m1(W, W) -----|
-                              |--> m1(W.p, W.p) or m1(W.p, W.q)? Undecidable.
-m1(Int, Float64) -> m1(W, W) -|
-```
