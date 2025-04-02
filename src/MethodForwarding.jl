@@ -169,19 +169,19 @@ function forward(_module_, @nospecialize(T), @nospecialize(S), @nospecialize(M))
     end
 
     derive_pairs = expand_to_pairs(parse_braces(T), fieldnames, fieldtypes)
-    @info derive_pairs
     evaldpairs = [Core.eval(_module_, d) for d in derive_pairs]
-    @info evaldpairs
+    # @info evaldpairs
     sig = first.(evaldpairs)
     if any(s == Any for s in sig)
         panic("Can't forward over Any.")
     end
 
+
     # builds a set of methods that contain our signature:
-    # 1. first, get a set of methods that contain at least all our types singularly
+    # get a set of methods that contain at least all our types singularly
     candidate_methods = Set()
     for mod_or_func in materialized_filters
-        union!(candidate_methods, intersect(Set.(methodswith.(sig, (mod_or_func,)))...))
+        union!(candidate_methods, intersect(Set.(methodswith.(sig, (mod_or_func,); supertypes=true))...))
     end
 
     filter!(m -> begin
