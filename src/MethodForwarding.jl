@@ -12,19 +12,25 @@ export @forward
 # 	{:Sym => :sym, ...}
 # output:
 #	Tuple of :Sym => :sym
+function isvalid_type(e::Expr)
+    e isa Symbol && return true
+    isexpr(e, :curly) && return true
+    isexpr(e, :where) && return true
+end
 function isvalid_pair(e::Expr)
     Base.isexpr(e, :call) &&
         e.args[1] == :(=>) &&
-        e.args[2] isa Symbol &&
+        isvalid_type(e.args[2]) &&
         e.args[3] isa QuoteNode
 end
+
 
 @noinline panic(msg) = throw(ArgumentError(msg))
 type_not_in_struct(type) = panic("The type $type is not present in the struct.")
 field_not_in_struct(field) = panic("The field $field is not present in the struct.")
 
 function parse_braces(T)
-    if T isa Symbol || isvalid_pair(T)
+    if isvalid_type(T) || isvalid_pair(T)
         return (T,)
     end
 
@@ -33,18 +39,19 @@ function parse_braces(T)
             T.args[i]
         end
     end
-
+    display(T)
     throw(ArgumentError("Invalid pattern."))
 end
 
 function expand_to_pairs(T, fieldnames, fieldtypes)
-
+    @info T fieldnames fieldtypes
     # check for ambiguity
-    type_count = Dict{Symbol,Int}()
+    type_count = Dict{Expr,Int}()
     for e in T
-        if e isa Symbol
-            e in fieldtypes || type_not_in_struct(e)
-            type_count[e] = get(type_count, e, 0) + 1
+        if isvalid_type(e)
+            key = isexpr(e, :where) ? e.args[1] : e
+            key in fieldtypes || type_not_in_struct(key)
+            type_count[key] = get(type_count, key, 0) + 1
         end
     end
 
@@ -62,16 +69,18 @@ function expand_to_pairs(T, fieldnames, fieldtypes)
     type_indexes = Dict(k => 1 for k in keys(type_count))
     expanded_pairs = ntuple(length(T)) do i
         ex = T[i]
-
-        if ex isa Symbol
+        @show ex
+        if isvalid_type(ex)
             S = ex
-            type_indexes[S] = findnext(isequal(S), fieldtypes, type_indexes[S]) + 1
-            f = fieldnames[type_indexes[S]-1]
+            key = isexpr(ex, :where) ? ex.args[1] : ex
+            type_indexes[key] = findnext(isequal(key), fieldtypes, type_indexes[key]) + 1
+            f = fieldnames[type_indexes[key]-1]
         elseif isvalid_pair(ex)
             S = ex.args[2]
+            notunionall_S = isexpr(S, :where) ? S.args[1] : S
             f = ex.args[3].value
+            notunionall_S in fieldtypes || type_not_in_struct(S)
         end
-        S in fieldtypes || type_not_in_struct(S)
         S == :Any && panic("Can't forward fields of type `Any`.")
         f in fieldnames || field_not_in_struct(f)
         return Expr(:call, :(=>), S, QuoteNode(f))
@@ -160,8 +169,11 @@ function forward(_module_, @nospecialize(T), @nospecialize(S), @nospecialize(M))
     end
 
     derive_pairs = expand_to_pairs(parse_braces(T), fieldnames, fieldtypes)
+    @info derive_pairs
     evaldpairs = [Core.eval(_module_, d) for d in derive_pairs]
+    @info evaldpairs
     sig = first.(evaldpairs)
+    @info sig sig[1]
 
     # builds a set of methods that contain our signature:
     # 1. first, get a set of methods that contain at least all our types singularly
@@ -188,25 +200,24 @@ function forward(_module_, @nospecialize(T), @nospecialize(S), @nospecialize(M))
                 push!(positions, i:i+sigwidth)
             end
         end
+
         if !isempty(positions)
             allmethods[m] = positions # we rely on the sortedness later so better ensure it
         end
     end
 
-    # Use: Base.arg_decl_parts(method) to deconstruct the method signature
-    # such that to keep the typevar information: x<:T y<:T where T<:...
-
     # generate the new signatures
+    argnametag = isexpr(Stype, :curly) ? Stype.args[1] : Stype
     methods_to_generate = []
     for (m, swap_positions) in allmethods
-        tv, decl, _... = Base.arg_decl_parts(m) # internal
+        tv, decl, _... = Base.arg_decl_parts(m)
+        @info tv decl
         argnames = [Symbol(d[1]) for d in decl[2:end]]
         argtypes = [Symbol(d[2]) for d in decl[2:end]]
-
         for positions in combinations(swap_positions)
             ranges_overlap_pairwise(sort!(positions)) && continue
 
-            argnameswaps = [gensym(Stype) for _ in 1:length(positions)]
+            argnameswaps = [gensym(argnametag) for _ in 1:length(positions)]
             argtypesswaps = fill(Stype, length(positions))
 
             newargnames = swapat(argnames, positions, argnameswaps)
@@ -236,7 +247,7 @@ function forward(_module_, @nospecialize(T), @nospecialize(S), @nospecialize(M))
         push!(retblk.args, gm)
     end
 
-    # @show esc(retblk)
+    @show esc(retblk)
     return esc(retblk)
 end
 
