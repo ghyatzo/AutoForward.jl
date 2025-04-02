@@ -13,10 +13,10 @@ export @forward
 # output:
 #	Tuple of :Sym => :sym
 function isvalid_type(e::Expr)
-    e isa Symbol && return true
-    isexpr(e, :curly) && return true
-    isexpr(e, :where) && return true
+    isexpr(e, :curly) || isexpr(e, :where)
 end
+isvalid_type(s::Symbol) = true
+
 function isvalid_pair(e::Expr)
     Base.isexpr(e, :call) &&
         e.args[1] == :(=>) &&
@@ -46,7 +46,7 @@ end
 function expand_to_pairs(T, fieldnames, fieldtypes)
     @info T fieldnames fieldtypes
     # check for ambiguity
-    type_count = Dict{Expr,Int}()
+    type_count = Dict{Any,Int}()
     for e in T
         if isvalid_type(e)
             key = isexpr(e, :where) ? e.args[1] : e
@@ -206,13 +206,21 @@ function forward(_module_, @nospecialize(T), @nospecialize(S), @nospecialize(M))
         end
     end
 
+    ## Useful decomposition:
+    # sig is a unionall T{<:P, S} where {S}
+    # unwrap the unionall which is nested:
+    # ua = unwrap_unionall(sig)
+    # T = nameof(ua)
+    # typevars: sig.var
+    # parameters = ua.parameters (which are typevars type with lowerbound, name and upperbound)
+
     # generate the new signatures
     argnametag = isexpr(Stype, :curly) ? Stype.args[1] : Stype
     methods_to_generate = []
     for (m, swap_positions) in allmethods
         tv, decl, _... = Base.arg_decl_parts(m)
         @info tv decl
-        argnames = [Symbol(d[1]) for d in decl[2:end]]
+        argnames = Base.method_argnames(m)[2:end]
         argtypes = [Symbol(d[2]) for d in decl[2:end]]
         for positions in combinations(swap_positions)
             ranges_overlap_pairwise(sort!(positions)) && continue
