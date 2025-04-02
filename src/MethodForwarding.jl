@@ -198,7 +198,8 @@ function forward(_module_, @nospecialize(T), @nospecialize(S), @nospecialize(M))
 
         positions = []
         for i in 1:length(msig)-sigwidth
-            if all(typeintersect.(msig[i:i+sigwidth], sig) .!= Union{})
+            msig_window = msig[i:i+sigwidth]
+            if all(sig .<: msig_window) && !any(msig_window .== Any)
                 push!(positions, i:i+sigwidth)
             end
         end
