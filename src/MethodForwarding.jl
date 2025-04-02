@@ -170,13 +170,12 @@ function forward(_module_, @nospecialize(T), @nospecialize(S), @nospecialize(M))
         union!(candidate_methods, intersect(Set.(methodswith.(sig, (mod_or_func,)))...))
     end
 
-    # 2. filter all the methods that have less than the number of types in our signature
-    filter!(m -> m.nargs > length(sig), candidate_methods)
-
-    # 3. remove constructors from the methods to derive
-    filter!(m -> getfield(m.module, m.name) isa Function, candidate_methods)
-
-    # 3. Scan the signature and discard all methods that do not contain the correct
+    filter!(m -> begin
+            m.nargs > length(sig) &&                # has enough arguments
+                !startswith(string(m.name), '@') &&  # is not a macro
+                fieldtype(m.sig, 1) <: Function     # is not a constructor
+        end, candidate_methods)
+    # Scan the signature and discard all methods that do not contain the correct
     # order. At the same time, match the matching positions with the method.
     allmethods = Dict()
     for m in candidate_methods
@@ -264,7 +263,8 @@ function swapat(base, positions, swaps)
 end
 
 function generate_signature(method, decl)
-    mexpr = Expr(:call, method.name)
+    mname = :($(method.module).$(method.name))
+    mexpr = Expr(:call, mname)
     for (argn, argt) in decl
         push!(mexpr.args, Expr(:(::), argn, argt))
     end
