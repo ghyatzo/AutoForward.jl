@@ -1,9 +1,20 @@
-# AutoForward.jl
+# MethodForwarding.jl
 
 ![lifecycle](https://img.shields.io/badge/lifecycle-experimental-orange.svg)
-[![build](https://github.com/ghyatzo/AutoForward.jl/workflows/CI/badge.svg)](https://github.com/ghyatzo/AutoForward.jl/actions?query=workflow%3ACI)
+[![build](https://github.com/ghyatzo/MethodForwarding.jl/workflows/CI/badge.svg)](https://github.com/ghyatzo/MethodForwarding.jl/actions?query=workflow%3ACI)
 
-This package exports a single macro `@forward`
+This package exports a single macro `@forward`.
+
+Similar packages:
+
+* `@forward` from [Lazy.jl](https://github.com/MikeInnes/Lazy.jl)
+* [ForwardMethods.jl](https://github.com/curtd/ForwardMethods.jl)
+* [ReusePatterns.jl](https://github.com/gcalderone/ReusePatterns.jl)
+
+ToDo:
+
+- [] Parametric types in patterns (i.e: @forward Array{T, N} struct ...)
+- [] Keyword arguments forwarding
 
 ## Basic Usage
 the wrapper will transparently behave as the specified type (if a single symbol)
@@ -58,8 +69,6 @@ we will end up with an explosion of methods and avoiding conflicting methods is 
 
 The forwarding is forced to be at the struct level definition to avoid type piracies, since all methods defined
 will be over the newly defined type. If instead forwarding was allowed for already generated types preventing type piracy would become an issue, while this way it is non existent.
-
-
 
 ### Single Type Forwarding Examples:
 ```julia

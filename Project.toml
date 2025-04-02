@@ -1,4 +1,4 @@
-name = "AutoForward"
+name = "MethodForwarding"
 uuid = "45e47a89-b455-4dd5-a62c-c007f63154db"
 authors = ["cschen <camillo.schenone@gmail.com>"]
 version = "0.1.0"

@@ -1,4 +1,4 @@
-module AutoForward
+module MethodForwarding
 using InteractiveUtils
 using MacroTools
 using Combinatorics
@@ -293,4 +293,4 @@ function ranges_overlap_pairwise(positions)
 end
 do_overlap(range1, range2) = max(range1[begin], range2[begin]) <= min(range1[end], range2[end])
 
-end # module AutoForward
+end # module MethodForwarding

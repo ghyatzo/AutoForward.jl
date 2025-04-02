@@ -1,5 +1,5 @@
 using Test
-using AutoForward
+using MethodForwarding
 using Statistics
 
 # =-=-= Testing =-=-=
@@ -36,11 +36,11 @@ struct Q end
     ]
     @assert length(patterns) == length(parse_result)
     @testset for (i, pattern) in enumerate(patterns)
-        @test AutoForward.parse_braces(pattern) == parse_result[i]
+        @test MethodForwarding.parse_braces(pattern) == parse_result[i]
     end
 
     for i in eachindex(bad_patterns)
-        @test_throws ArgumentError AutoForward.parse_braces(bad_patterns[i])
+        @test_throws ArgumentError MethodForwarding.parse_braces(bad_patterns[i])
     end
 end
 # test expanding
@@ -82,11 +82,11 @@ end
 
     @assert length(expand_results) == length(parse_result)
     @testset for (i, pattern) = enumerate(parse_result)
-        @test AutoForward.expand_to_pairs(pattern, fnames, ftypes) == expand_results[i]
+        @test MethodForwarding.expand_to_pairs(pattern, fnames, ftypes) == expand_results[i]
     end
 
     @testset for badparse in bad_parses
-        @test_throws ArgumentError AutoForward.expand_to_pairs(badparse, fnames, ftypes)
+        @test_throws ArgumentError MethodForwarding.expand_to_pairs(badparse, fnames, ftypes)
     end
 end
 
