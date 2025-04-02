@@ -242,12 +242,39 @@ function forward(_module_, @nospecialize(T), @nospecialize(S), @nospecialize(M))
 
             newdecl = collect(zip(newargnames, newargtypes))
 
-            newsignature = generate_signature(m, newdecl)
             if !isempty(tv)
                 # filter the tv to remove the typevars we substituted
                 newtv = filter(tvar -> tvar.name in newargtypes, tv)
-                newsignature = Expr(:where, newsignature, newtv...)
+            else
+                newtv = []
             end
+
+            # we need to add the tv variants for the
+            # remaining parameters of the struct
+            if isexpr(Stype, :curly)
+                params = Stype.args[2:end]
+                #TODO: multiple signatures
+                if sig[1] isa UnionAll
+                    sigtvs = [p.name for p in Base.unwrap_unionall(sig[1]).parameters]
+                else
+                    sigtvs = []
+                end
+                paramtv = [TypeVar(p) for p in params if p ∉ sigtvs]
+                push!(newtv, paramtv...)
+            end
+            # for each unionall in the signature we desire
+            # extract and save the typevariables
+            for typ in sig
+                typ isa UnionAll || continue
+                typ = Base.unwrap_unionall(typ)
+                tvs = typ.parameters
+                for tv in tvs
+                    tv isa TypeVar && push!(newtv, tv)
+                end
+            end
+            newsignature = generate_signature(m, newdecl, newtv)
+            @info m newsignature
+            # Meta.dump(newsignature)
             methodforwardcall = generate_forward_call(m, Stype, newdecl, evaldpairs)
 
             methodforwardcall == Symbol("#skip#") && continue
