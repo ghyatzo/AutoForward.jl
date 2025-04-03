@@ -141,8 +141,6 @@ function forward(_module_, @nospecialize(T), @nospecialize(S), @nospecialize(M))
         push!(fieldnames, fn)
     end
 
-    # @info Stype T fieldnames fieldtypes
-
     @capture(M, (filters__,)) || panic("Specific functions or modules must be in a tuple.")
     materialized_filters = []
     for filter in filters
@@ -182,7 +180,7 @@ function forward(_module_, @nospecialize(T), @nospecialize(S), @nospecialize(M))
         union!(candidate_methods, intersect(Set.(methodswith.(forwardsig, (mod_or_func,); supertypes=true))...))
     end
 
-    exclude_list = (:similar,)
+    exclude_list = ()
     filter!(m -> begin
             m.nargs > length(forwardsig) &&                # has enough arguments
                 !startswith(string(m.name), '@') &&  # is not a macro
@@ -220,10 +218,41 @@ function forward(_module_, @nospecialize(T), @nospecialize(S), @nospecialize(M))
     # returntype of method: Base.infer_return_type(getfield(m2.module, m2.name), Tuple(fieldtype.(m2.sig, 2:m2.nargs)))
 
     # generate the new signatures
-    argnametag = isexpr(Stype, :curly) ? Stype.args[1] : Stype
+    if isexpr(Stype, :curly)
+        argnametag = Stype.args[1]
+        params = Stype.args[2:end]
+        gensymd_struct_params = [Symbol("#", p) for p in params]
+        gensymd_Stype = Expr(:curly, argnametag, gensymd_struct_params...)
+    else
+        argnametag = Stype
+        params = []
+        gensymd_struct_params = []
+        gensymd_Stype = Stype
+    end
+
+    # Collect all typevars from our pattern
+    # and all the remaining ones from the struct definition
+    forwardtvs = []
+    tvsyms = []
+    for sig in forwardsig
+        sig isa UnionAll || continue
+        tvs = Base.unwrap_unionall(sig).parameters
+        for tv in tvs
+            !isa(tv, TypeVar) && continue
+            push!(tvsyms, tv.name)
+            push!(forwardtvs, TypeVar(Symbol("#", tv.name), tv.lb, tv.ub))
+        end
+    end
+    for p in params
+        p ∈ tvsyms && continue
+        push!(forwardtvs, TypeVar(Symbol("#", p)))
+    end
+
     methods_to_generate = []
     for (m, swap_positions) in allmethods
         msig = m.sig
+
+        # get all typevars used in the method signature
         tv = []
         while msig isa UnionAll
             push!(tv, msig.var)
@@ -231,52 +260,31 @@ function forward(_module_, @nospecialize(T), @nospecialize(S), @nospecialize(M))
         end
 
         argnames = Base.method_argnames(m)[2:end]
-        argtypes = fieldtype.(m.sig, collect(2:m.nargs))
-        @info argnames argtypes
+        argtypes = fieldtype.(m.sig, 2:m.nargs)
 
         for positions in combinations(swap_positions)
             ranges_overlap_pairwise(sort!(positions)) && continue
 
             argnameswaps = [gensym(argnametag) for _ in 1:length(positions)]
-            argtypesswaps = fill(Stype, length(positions))
+            argtypesswaps = fill(gensymd_Stype, length(positions))
 
             newargnames = swapat(argnames, positions, argnameswaps)
             newargtypes = swapat(argtypes, positions, argtypesswaps)
 
+            # concretesig = swapat(argtypes, positions, fill(forwardsig[1], length(positions)))
+            # @info concretesig
+            # returntype = Base.infer_return_type(getfield(m.module, m.name), Tuple(concretesig))
+            # @warn m concretesig returntype
+
             newdecl = zip(newargnames, newargtypes)
 
-            if !isempty(tv)
-                # filter the tv to remove the typevars we substituted
-                newtv = filter(tvar -> tvar.name in newargtypes, tv)
-            else
-                newtv = []
-            end
+            # filter the tv to remove the typevars we substituted
+            filtered_method_tvs = filter(tvar -> tvar.name in newargtypes, tv)
+            newtv = [forwardtvs; filtered_method_tvs]
 
-            # TODO: Properly deal with multiple parametric signature
-            # for each unionall in the signature we desire
-            # extract and save the typevariables
-            sigtvs = []
-            for sig in forwardsig
-                sig isa UnionAll || continue
-                tvs = Base.unwrap_unionall(sig).parameters
-                for tv in tvs
-                    tv isa TypeVar && push!(sigtvs, tv)
-                end
-            end
-            push!(newtv, sigtvs...)
-
-            # we need to add the tv variants for the
-            # remaining parameters of the struct
-            if isexpr(Stype, :curly)
-                params = Stype.args[2:end]
-                paramtv = [TypeVar(p) for p in params if p ∉ getfield.(sigtvs, :name)]
-                push!(newtv, paramtv...)
-            end
-
-            newsignature = generate_signature(m, newdecl, newtv)
             methodforwardcall = generate_forward_call(m, Stype, newdecl, evaldpairs)
-
             methodforwardcall == Symbol("#skip#") && continue
+            newsignature = generate_signature(m, newdecl, newtv)
 
             ex = Expr(:(=), newsignature, methodforwardcall)
             push!(methods_to_generate, ex)
@@ -293,7 +301,6 @@ function forward(_module_, @nospecialize(T), @nospecialize(S), @nospecialize(M))
 
     # @show esc(retblk)
     return esc(retblk)
-    return nothing
 end
 
 function swapat(base, positions, swaps)
@@ -339,7 +346,7 @@ function generate_signature(method, decl, typevars=[])
     mname = method.name
     mexpr = Expr(:call, :($mmodule.$mname))
     for (argn, argt) in decl
-        ex = argn == Symbol("#unused#") ?
+        ex = argn == Symbol("#unused#") || argn == Symbol("") ?
              Expr(:(::), argt) : Expr(:(::), argn, argt)
 
         push!(mexpr.args, ex)
@@ -365,7 +372,7 @@ function generate_forward_call(method, forward_t, decl, derivepairs)
                 push!(mexpr.args, getfieldex)
             end
         else
-            if argn == Symbol("#unused#")
+            if argn == Symbol("#unused#") || argn == Symbol("")
                 defaultconstructor = methods(argt, Tuple{})
                 isempty(defaultconstructor) && return Symbol("#skip#")
                 push!(mexpr.args, Expr(:call, argt))

@@ -1,4 +1,5 @@
 using Test
+using MacroTools
 using MethodForwarding
 using Statistics
 
@@ -92,18 +93,28 @@ end
 
 @testset "Expand Parametric Types" begin
     parse_result = [
-        (:(Array{M,N} where {M,N})),
-        (:(Array{M,N} where {M<:Integer,N}))
+        (:(Array{M,N} where {M,N}),),
+        (:(Array{M,N} where {M<:Integer,N}),)
     ]
-    struct WrapParam{M,N}
+    S = :(struct WrapParam{M,N}
         v::Array{M,N}
+    end)
+    @capture(S, struct Sdef_
+        Sfields__
+    end)
+    ftypes = []
+    fnames = []
+    for expr in Sfields
+        @capture(expr, fn_::ft_ | fn_) || error("unsupported field.")
+
+        ft = isnothing(ft) ? :Any : ft
+        push!(ftypes, ft)
+        push!(fnames, fn)
     end
-    fnames = fieldnames(WrapParam)
-    ftypes = Symbol.(fieldtypes(WrapParam))
 
     expand_results = [
-        (:(Array{M,N} where {M,N} => :v)),
-        (:(Array{M,N} where {M<:Integer,N} => :v)),
+        (:(Array{M,N} where {M,N} => :v),),
+        (:(Array{M,N} where {M<:Integer,N} => :v),),
     ]
 
     @assert length(expand_results) == length(parse_result)
@@ -303,9 +314,9 @@ end
 @forward Array{T,N} where {T,N},
 struct MyArray{T,N} #<: AbstractArray{T, N}
     a::Array{T,N}
-    attr::Int
+    some_attr::Int
     MyArray(T, dims::NTuple{N,Int}) where {N} = new{T,N}(zeros(T, dims...), 1)
-end, Base.show
+end, (Base.show, Base.size)
 
 a = MyArray(Float64, (2, 2, 2))
 @show size(a)
