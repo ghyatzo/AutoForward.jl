@@ -193,10 +193,10 @@ scale!(derivedregpoly, 1)
 @test coords_y(testregpoly) == coords_y(derivedregpoly)
 
 ##============== Multitype Forward ===========##
+method1(a::Int, b::Int) = a + b
+method2(a::Int, b::Int) = a - b
+method3(a::Int, b::Int, c::Int) = a + b + c
 @testset "Multiple Forward" begin
-    method1(a::Int, b::Int) = a + b
-    method2(a::Int, b::Int) = a - b
-    method3(a::Int, b::Int, c::Int) = a + b + c
 
     @forward {Int, Int} struct Point
         x::Int
@@ -208,15 +208,16 @@ scale!(derivedregpoly, 1)
     @test method1(p) == 2
     @test method3(1, p) == 3
     @test method3(p, 1) == 3
+
 end
 
+module AnotherModule
+export testmethod #also work with public
+testmethod(a::Int, b::Int) = a + b + 100
+privatemethod(a::Int, b::Int) = a + b + 200
+end
+using .AnotherModule
 @testset "Filtering" begin
-    module AnotherModule
-    export testmethod #also work with public
-    testmethod(a::Int, b::Int) = a + b + 100
-    privatemethod(a::Int, b::Int) = a + b + 200
-    end
-    using .AnotherModule
 
     @forward {Int, Int}, struct Point2
         x::Int
@@ -257,13 +258,14 @@ end
     end, (AnotherModule,)
 end
 
+
+struct HasDefault end
+struct HasNoDefault
+    x::Int
+end
+mtest(::HasDefault, ::String) = "hasdefault"
+mtest(::HasNoDefault, ::String) = "hasnodefault"
 @testset "Unused Arguments" begin
-    struct HasDefault end
-    struct HasNoDefault
-        x::Int
-    end
-    mtest(::HasDefault, ::String) = "hasdefault"
-    mtest(::HasNoDefault, ::String) = "hasnodefault"
 
     @forward String struct Wrapper
         s::String
