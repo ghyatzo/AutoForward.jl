@@ -90,6 +90,7 @@ end
     end
 end
 
+
 # Automatic Derivations
 # =-=-= ~~~~~~~~~~~ Setup ~~~~~~~~~~~~
 
@@ -104,6 +105,29 @@ end
 vertices(p::Polygon) = length(p.x)
 coords_x(p::Polygon) = p.x
 coords_y(p::Polygon) = p.y
+
+# Move, scale and rotate a polygon
+function move!(p::Polygon, dx::Real, dy::Real)
+    p.x .+= dx
+    p.y .+= dy
+end
+
+function scale!(p::Polygon, scale::Real)
+    m = mean(p.x)
+    p.x = (p.x .- m) .* scale .+ m
+    m = mean(p.y)
+    p.y = (p.y .- m) .* scale .+ m
+end
+
+function rotate!(p::Polygon, angle_deg::Real)
+    θ = float(angle_deg) * pi / 180
+    R = [cos(θ) -sin(θ); sin(θ) cos(θ)]
+    x = p.x .- mean(p.x)
+    y = p.y .- mean(p.y)
+    (x, y) = R * [x, y]
+    p.x = x .+ mean(p.x)
+    p.y = y .+ mean(p.y)
+end
 
 # =-=-= ~~~~~~~~~~ Extension
 mutable struct TestRegularPolygon <: AbstractPolygon
