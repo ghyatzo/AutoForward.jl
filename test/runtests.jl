@@ -90,6 +90,28 @@ end
     end
 end
 
+@testset "Expand Parametric Types" begin
+    parse_result = [
+        (:(Array{M,N} where {M,N})),
+        (:(Array{M,N} where {M<:Integer,N}))
+    ]
+    struct WrapParam{M,N}
+        v::Array{M,N}
+    end
+    fnames = fieldnames(WrapParam)
+    ftypes = Symbol.(fieldtypes(WrapParam))
+
+    expand_results = [
+        (:(Array{M,N} where {M,N} => :v)),
+        (:(Array{M,N} where {M<:Integer,N} => :v)),
+    ]
+
+    @assert length(expand_results) == length(parse_result)
+    @testset for (i, pattern) = enumerate(parse_result)
+        @test MethodForwarding.expand_to_pairs(pattern, fnames, ftypes) == expand_results[i]
+    end
+end
+
 
 # Automatic Derivations
 # =-=-= ~~~~~~~~~~~ Setup ~~~~~~~~~~~~
@@ -105,29 +127,6 @@ end
 vertices(p::Polygon) = length(p.x)
 coords_x(p::Polygon) = p.x
 coords_y(p::Polygon) = p.y
-
-# Move, scale and rotate a polygon
-function move!(p::Polygon, dx::Real, dy::Real)
-    p.x .+= dx
-    p.y .+= dy
-end
-
-function scale!(p::Polygon, scale::Real)
-    m = mean(p.x)
-    p.x = (p.x .- m) .* scale .+ m
-    m = mean(p.y)
-    p.y = (p.y .- m) .* scale .+ m
-end
-
-function rotate!(p::Polygon, angle_deg::Real)
-    θ = float(angle_deg) * pi / 180
-    R = [cos(θ) -sin(θ); sin(θ) cos(θ)]
-    x = p.x .- mean(p.x)
-    y = p.y .- mean(p.y)
-    (x, y) = R * [x, y]
-    p.x = x .+ mean(p.x)
-    p.y = y .+ mean(p.y)
-end
 
 # =-=-= ~~~~~~~~~~ Extension
 mutable struct TestRegularPolygon <: AbstractPolygon
@@ -192,64 +191,85 @@ scale!(derivedregpoly, 1)
 @test coords_x(testregpoly) == coords_x(derivedregpoly)
 @test coords_y(testregpoly) == coords_y(derivedregpoly)
 
-## Multitype Forward
-method1(a::Int, b::Int) = a + b
-method2(a::Int, b::Int) = a - b
-method3(a::Int, b::Int, c::Int) = a + b + c
+##============== Multitype Forward ===========##
+@testset "Multiple Forward" begin
+    method1(a::Int, b::Int) = a + b
+    method2(a::Int, b::Int) = a - b
+    method3(a::Int, b::Int, c::Int) = a + b + c
 
-@forward {Int, Int} struct Point
-    x::Int
-    y::Int
+    @forward {Int, Int} struct Point
+        x::Int
+        y::Int
+    end
+
+    p = Point(1, 1)
+
+    @test method1(p) == 2
+    @test method3(1, p) == 3
+    @test method3(p, 1) == 3
 end
 
-p = Point(1, 1)
+@testset "Filtering" begin
+    module AnotherModule
+    export testmethod #also work with public
+    testmethod(a::Int, b::Int) = a + b + 100
+    privatemethod(a::Int, b::Int) = a + b + 200
+    end
+    using .AnotherModule
 
-@test method1(p) == 2
-@test method3(1, p) == 3
-@test method3(p, 1) == 3
+    @forward {Int, Int}, struct Point2
+        x::Int
+        y::Int
+    end, (AnotherModule,)
 
-module AnotherModule
-export testmethod #also work with public
-testmethod(a::Int, b::Int) = a + b + 100
-privatemethod(a::Int, b::Int) = a + b + 200
+    p2 = Point2(1, 1)
+    @test testmethod(p2) == 102
+    @test_throws MethodError method1(p2)
+
+    @forward {Int, Int} struct Point3
+        x::Int
+        y::Int
+    end (
+        method1,
+        method3,
+        AnotherModule,
+        AnotherModule.privatemethod
+    )
+    p3 = Point3(1, 1)
+
+    @test method1(p3) == 2
+    @test_throws MethodError method2(p3)
+    @test method3(1, p3) == 3
+    @test method3(p3, 1) == 3
+    @test testmethod(p3) == 102
+    @test AnotherModule.privatemethod(p3) == 202
 end
-using .AnotherModule
 
-@forward {Int, Int}, struct Point2
-    x::Int
-    y::Int
-end, (AnotherModule,)
+@testset "CallingSequence" begin
+    @forward T,
+    struct StackedCall
+        t::T
+    end (AnotherModule)
 
-p2 = Point2(1, 1)
-@test testmethod(p2) == 102
-@test_throws MethodError method1(p2)
+    @forward T struct CallingSequence
+        t::T
+    end, (AnotherModule,)
+end
 
-@forward {Int, Int} struct Point3
-    x::Int
-    y::Int
-end (
-    method1,
-    method3,
-    AnotherModule,
-    AnotherModule.privatemethod
-)
-p3 = Point3(1, 1)
+@testset "Unused Arguments" begin
+    struct HasDefault end
+    struct HasNoDefault
+        x::Int
+    end
+    mtest(::HasDefault, ::String) = "hasdefault"
+    mtest(::HasNoDefault, ::String) = "hasnodefault"
 
-@test method1(p3) == 2
-@test_throws MethodError method2(p3)
-@test method3(1, p3) == 3
-@test method3(p3, 1) == 3
-@test testmethod(p3) == 102
-@test AnotherModule.privatemethod(p3) == 202
+    @forward String struct Wrapper
+        s::String
+    end
 
-
-@forward T,
-struct StackedCall
-    t::T
-end (AnotherModule)
-
-@forward T struct CallingSequence
-    t::T
-end, (AnotherModule,)
-
+    w = Wrapper("HELLO")
+    @test mtest(HasDefault(), w) == "hasdefault"
+    @test_throws MethodError mtest(HasNoDefault(10), w)
+end
 

@@ -222,6 +222,8 @@ function forward(_module_, @nospecialize(T), @nospecialize(S), @nospecialize(M))
             end
             methodforwardcall = generate_forward_call(m, Stype, newdecl, evaldpairs)
 
+            methodforwardcall == Symbol("#skip#") && continue
+
             ex = Expr(:(=), newsignature, methodforwardcall)
             push!(methods_to_generate, ex)
         end
@@ -230,6 +232,7 @@ function forward(_module_, @nospecialize(T), @nospecialize(S), @nospecialize(M))
     retblk = Expr(:block)
     push!(retblk.args, S)
     for gm in methods_to_generate
+
         push!(retblk.args, gm)
     end
 
@@ -266,7 +269,10 @@ function generate_signature(method, decl)
     mname = :($(method.module).$(method.name))
     mexpr = Expr(:call, mname)
     for (argn, argt) in decl
-        push!(mexpr.args, Expr(:(::), argn, argt))
+        ex = argn == Symbol("#unused#") ?
+             Expr(:(::), argt) : Expr(:(::), argn, argt)
+
+        push!(mexpr.args, ex)
     end
     return mexpr
 end
@@ -282,7 +288,13 @@ function generate_forward_call(method, forward_t, decl, derivepairs)
                 push!(mexpr.args, getfieldex)
             end
         else
-            push!(mexpr.args, argn)
+            if argn == Symbol("#unused#")
+                defaultconstructor = methods(argt, Tuple{})
+                isempty(defaultconstructor) && return Symbol("#skip#")
+                push!(mexpr.args, Expr(:call, argt))
+            else
+                push!(mexpr.args, argn)
+            end
         end
     end
     return mexpr
