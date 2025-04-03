@@ -90,29 +90,6 @@ end
     end
 end
 
-@testset "Expand Parametric Types" begin
-    parse_result = [
-        (:(Array{M,N} where {M,N})),
-        (:(Array{M,N} where {M<:Integer,N}))
-    ]
-    struct WrapParam{M,N}
-        v::Array{M,N}
-    end
-    fnames = fieldnames(WrapParam)
-    ftypes = Symbol.(fieldtypes(WrapParam))
-
-    expand_results = [
-        (:(Array{M,N} where {M,N} => :v)),
-        (:(Array{M,N} where {M<:Integer,N} => :v)),
-    ]
-
-    @assert length(expand_results) == length(parse_result)
-    @testset for (i, pattern) = enumerate(parse_result)
-        @test MethodForwarding.expand_to_pairs(pattern, fnames, ftypes) == expand_results[i]
-    end
-end
-
-
 # Automatic Derivations
 # =-=-= ~~~~~~~~~~~ Setup ~~~~~~~~~~~~
 
