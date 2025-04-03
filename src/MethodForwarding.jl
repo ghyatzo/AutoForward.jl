@@ -5,6 +5,9 @@ using Combinatorics
 
 export @forward
 
+# Filtering method is additive, Specify single/list of modules or functions-
+# Exclusion from previous specification (prepend a -)
+
 # possible inputs:
 # 	:Symbol ( must be automatically turned into a Pair)
 #	:Sym => :sym
@@ -23,7 +26,6 @@ function isvalid_pair(e::Expr)
         isvalid_type(e.args[2]) &&
         e.args[3] isa QuoteNode
 end
-
 
 @noinline panic(msg) = throw(ArgumentError(msg))
 type_not_in_struct(type) = panic("The type $type is not present in the struct.")
@@ -111,7 +113,7 @@ macro forward(exargs...)
     else
         T, S, M = exargs
     end
-    if M isa Symbol
+    if !isexpr(M, :tuple)
         M = Expr(:tuple, M)
     end
 
@@ -139,7 +141,7 @@ function forward(_module_, @nospecialize(T), @nospecialize(S), @nospecialize(M))
         push!(fieldnames, fn)
     end
 
-    @info Stype T fieldnames fieldtypes
+    # @info Stype T fieldnames fieldtypes
 
     @capture(M, (filters__,)) || panic("Specific functions or modules must be in a tuple.")
     materialized_filters = []
@@ -153,52 +155,51 @@ function forward(_module_, @nospecialize(T), @nospecialize(S), @nospecialize(M))
             f = isdefined(mod, func) ? getfield(mod, func) :
                 throw(UndefVarError(func, mod))
 
-            f isa Function ? push!(materialized_filters, f) : panic("$f must be a Function")
+            f isa Function ? push!(materialized_filters, f) : panic("$f is not a Function")
 
         elseif filter isa Symbol
             mf = isdefined(_module_, filter) ? getfield(_module_, filter) :
                  throw(UndefVarError(filter, _module_))
 
-            mf isa Union{Module,Function} ?
-            push!(materialized_filters, mf) :
+            mf isa Union{Module,Function} ? push!(materialized_filters, mf) :
             panic("$mf must be a Module or a Function")
         else
             panic("unsupported filter: $filter")
         end
     end
 
-    derive_pairs = expand_to_pairs(parse_braces(T), fieldnames, fieldtypes)
-    evaldpairs = [Core.eval(_module_, d) for d in derive_pairs]
-    # @info evaldpairs
-    sig = first.(evaldpairs)
-    if any(s == Any for s in sig)
+    forwardpairs = expand_to_pairs(parse_braces(T), fieldnames, fieldtypes)
+    evaldpairs = [Core.eval(_module_, d) for d in forwardpairs]
+    forwardsig = first.(evaldpairs)
+    if any(s == Any for s in forwardsig)
         panic("Can't forward over Any.")
     end
-
 
     # builds a set of methods that contain our signature:
     # get a set of methods that contain at least all our types singularly
     candidate_methods = Set()
     for mod_or_func in materialized_filters
-        union!(candidate_methods, intersect(Set.(methodswith.(sig, (mod_or_func,); supertypes=true))...))
+        union!(candidate_methods, intersect(Set.(methodswith.(forwardsig, (mod_or_func,); supertypes=true))...))
     end
 
+    exclude_list = (:similar,)
     filter!(m -> begin
-            m.nargs > length(sig) &&                # has enough arguments
+            m.nargs > length(forwardsig) &&                # has enough arguments
                 !startswith(string(m.name), '@') &&  # is not a macro
-                fieldtype(m.sig, 1) <: Function     # is not a constructor
+                fieldtype(m.sig, 1) <: Function &&    # is not a constructor
+                all(m.name != excludedf for excludedf in exclude_list)
         end, candidate_methods)
     # Scan the signature and discard all methods that do not contain the correct
     # order. At the same time, match the matching positions with the method.
     allmethods = Dict()
     for m in candidate_methods
         msig = fieldtype.(m.sig, collect(2:m.nargs))
-        sigwidth = length(sig) - 1
+        sigwidth = length(forwardsig) - 1
 
         positions = []
         for i in 1:length(msig)-sigwidth
             msig_window = msig[i:i+sigwidth]
-            if all(sig .<: msig_window) && !any(msig_window .== Any)
+            if all(forwardsig .<: msig_window) && !any(msig_window .== Any)
                 push!(positions, i:i+sigwidth)
             end
         end
@@ -216,6 +217,8 @@ function forward(_module_, @nospecialize(T), @nospecialize(S), @nospecialize(M))
     # typevars: sig.var
     # parameters = ua.parameters (which are typevars type with lowerbound, name and upperbound)
 
+    # returntype of method: Base.infer_return_type(getfield(m2.module, m2.name), Tuple(fieldtype.(m2.sig, 2:m2.nargs)))
+
     # generate the new signatures
     argnametag = isexpr(Stype, :curly) ? Stype.args[1] : Stype
     methods_to_generate = []
@@ -226,10 +229,11 @@ function forward(_module_, @nospecialize(T), @nospecialize(S), @nospecialize(M))
             push!(tv, msig.var)
             msig = msig.body
         end
-        # tv, decl, _... = Base.arg_decl_parts(m)
 
         argnames = Base.method_argnames(m)[2:end]
         argtypes = fieldtype.(m.sig, collect(2:m.nargs))
+        @info argnames argtypes
+
         for positions in combinations(swap_positions)
             ranges_overlap_pairwise(sort!(positions)) && continue
 
@@ -252,9 +256,9 @@ function forward(_module_, @nospecialize(T), @nospecialize(S), @nospecialize(M))
             # for each unionall in the signature we desire
             # extract and save the typevariables
             sigtvs = []
-            for typ in sig
-                typ isa UnionAll || continue
-                tvs = Base.unwrap_unionall(typ).parameters
+            for sig in forwardsig
+                sig isa UnionAll || continue
+                tvs = Base.unwrap_unionall(sig).parameters
                 for tv in tvs
                     tv isa TypeVar && push!(sigtvs, tv)
                 end
