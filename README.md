@@ -18,6 +18,8 @@ ToDo:
 - [ ] Multiple Parametric types in patterns
 	(i.e.: `@forward {Vector{T} where T <: Integer, Vector{N} where N <: Float64}`)
 - [ ] Keyword arguments forwarding
+- [ ] Explore "rewrapping" behaviour
+- [ ] Add a "dry run" mode
 
 ## Basic Usage
 the wrapper will transparently behave as the specified type (if a single symbol)
