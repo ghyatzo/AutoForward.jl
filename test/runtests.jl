@@ -276,3 +276,19 @@ mtest(::HasNoDefault, ::String) = "hasnodefault"
     @test_throws MethodError mtest(HasNoDefault(10), w)
 end
 
+# parametric forwarding
+@forward Array{T,N} where {T,N},
+struct MyArray{T,N} #<: AbstractArray{T, N}
+    a::Array{T,N}
+    attr::Int
+    MyArray(T, dims::NTuple{N,Int}) where {N} = new{T,N}(zeros(T, dims...), 1)
+end, Base.show
+
+a = MyArray(Float64, (2, 2, 2))
+@show size(a)
+
+
+
+
+
+
