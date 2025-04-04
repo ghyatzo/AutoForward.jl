@@ -136,6 +136,57 @@ square = RegularPolygon(4, 5)
 @assert vertices(square) == 4
 ```
 
+#### Parametric Forwarding
+It is also possible to forward based on the parametric types of a field:
+```julia
+@forward Array{T,N} where {T,N},
+struct MyArray{T,N}
+    a::Array{T,N}
+    some_attr::Int
+    MyArray(T, dims::NTuple{N,Int}) where {N} = new{T,N}(zeros(T, dims...), 1)
+end, (Base.size,)
+
+a = MyArray(Float64, (2, 2, 2))
+@assert size(a) == (2,2,2)
+```
+The forwarding pattern can be any unionall type that uses correctly the same type variables as those
+defined in the struct. In the example above defining `@forward Array{M,N} where {M,N}` would result in an error.
+Also, the unionall must be typed in full, `@forward Array{T, N} ...` would also result in an error.
+
+Being a generic unionall type it is possible to specify the forwarding only to specific subtypes of the struct:
+recicling the previous example:
+```julia
+@forward Array{T,N} where {T<:Integer,N},
+struct MyArray{T,N}
+    a::Array{T,N}
+    some_attr::Int
+    MyArray(T, dims::NTuple{N,Int}) where {N} = new{T,N}(zeros(T, dims...), 1)
+end, (Base.size,)
+
+afloat = MyArray(Float64, (2, 2, 2))
+aint = MyArray(Int, (2, 2, 2))
+
+@assert size(aint) == (2,2,2)
+size(afloat) # results in a method error.
+```
+
+#### Handling of unused arguments
+Some method definitions are defined without the need for an argument name since they only care about the type.
+For example, this is often used in the "holy trait" pattern:
+```
+struct Trait end
+struct NoTrait end
+
+mfunc(::Trait, a::Int) = "hastrait"
+mfunc(::NoTrait, a::Int) = "hasnotrait"
+```
+In this case the macro recognizes the missing argument, and if the type has a default constructor
+the forwarding will be done calling the type again to propagate it:
+```
+mfunc(::Trait, a::MyWrapper) = mfunc(Trait(), MyWrapper.a)
+```
+Otherwise the method will be skipped and the method forwarding will need to be handled manually.
+
 ### Splat Forwarding:
 same thing with `<T>` being a sequence of types in braces
 ```julia
