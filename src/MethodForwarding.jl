@@ -60,8 +60,7 @@ function expand_to_pairs(T, fieldnames, fieldtypes)
         if type_count[k] != count(isequal(k), fieldtypes)
             throw(ArgumentError("""
             	Mismatch between number of implicit `$k` to be derived compared to explicit fields of type `$k` in the struct.
-            	Specify the derive types by using the explicit notation: $k => <Symbol of the field name>
-            	or match the number of fields in the struct.
+            	Specify the derive types by using the explicit notation: $k => <Symbol of the field name> or match the number of fields in the struct.
             """))
         end
     end
@@ -173,6 +172,49 @@ function forward(_module_, @nospecialize(T), @nospecialize(S), @nospecialize(M))
         panic("Can't forward over Any.")
     end
 
+    # exteact the new struct type and gensym its type parameters if any
+    if isexpr(Stype, :curly)
+        structbasename = Stype.args[1]
+        params = Stype.args[2:end]
+        gensymd_struct_params = [Symbol("#", p) for p in params]
+        gensymd_Stype = Expr(:curly, structbasename, gensymd_struct_params...)
+    else
+        structbasename = Stype
+        params = []
+        gensymd_struct_params = []
+        gensymd_Stype = Stype
+    end
+
+    # Collect all typevars from our pattern
+    # and all the remaining ones from the struct definition
+    forwardtvs = Dict()
+    for sig in forwardsig
+        sig isa UnionAll || continue
+        tvs = Base.unwrap_unionall(sig).parameters
+        for tv in tvs
+            !isa(tv, TypeVar) && continue
+            setdefaultpush!(forwardtvs, TypeVar(Symbol("#", tv.name), tv.lb, tv.ub), tv.name)
+            # setindex!(forwardtvs, push!(get(forwardtvs, tv.name, []), TypeVar(Symbol("#", tv.name), tv.lb, tv.ub)), tv.name)
+        end
+    end
+    # in case we have multiple tvs with the same name, we want to coalesce them
+    # into a single supertype that represents both. And look for methods that dispatch on that supertype, since
+    # in the methodcall, the typeparameter will be only one, the one from the struct
+    for tvname in keys(forwardtvs)
+        local coalesced_tv = TypeVar(tvname, Union{})
+        for tv in forwardtvs[tvname]
+            lb = typejoin(coalesced_tv.lb, tv.lb)
+            ub = typejoin(coalesced_tv.ub, tv.ub)
+            coalesced_tv = TypeVar(tv.name, lb, ub)
+        end
+        forwardtvs[tvname] = coalesced_tv
+    end
+    # the remaining parameters don't offer anything new in terms of bounds.
+    for p in params
+        p ∈ keys(forwardtvs) && continue
+        forwardtvs[p] = TypeVar(Symbol("#", p))
+    end
+
     # builds a set of methods that contain our signature:
     # get a set of methods that contain at least all our types singularly
     candidate_methods = Set()
@@ -182,10 +224,10 @@ function forward(_module_, @nospecialize(T), @nospecialize(S), @nospecialize(M))
 
     exclude_list = ()
     filter!(m -> begin
-            m.nargs > length(forwardsig) &&                # has enough arguments
+            all(m.name != excludedf for excludedf in exclude_list) &&
+                m.nargs > length(forwardsig) &&                # has enough arguments
                 !startswith(string(m.name), '@') &&  # is not a macro
-                fieldtype(m.sig, 1) <: Function &&    # is not a constructor
-                all(m.name != excludedf for excludedf in exclude_list)
+                fieldtype(m.sig, 1) <: Function   # is not a constructor
         end, candidate_methods)
     # Scan the signature and discard all methods that do not contain the correct
     # order. At the same time, match the matching positions with the method.
@@ -203,7 +245,7 @@ function forward(_module_, @nospecialize(T), @nospecialize(S), @nospecialize(M))
         end
 
         if !isempty(positions)
-            allmethods[m] = positions # we rely on the sortedness later so better ensure it
+            allmethods[m] = positions
         end
     end
 
@@ -216,37 +258,6 @@ function forward(_module_, @nospecialize(T), @nospecialize(S), @nospecialize(M))
     # parameters = ua.parameters (which are typevars type with lowerbound, name and upperbound)
 
     # returntype of method: Base.infer_return_type(getfield(m2.module, m2.name), Tuple(fieldtype.(m2.sig, 2:m2.nargs)))
-
-    # generate the new signatures
-    if isexpr(Stype, :curly)
-        argnametag = Stype.args[1]
-        params = Stype.args[2:end]
-        gensymd_struct_params = [Symbol("#", p) for p in params]
-        gensymd_Stype = Expr(:curly, argnametag, gensymd_struct_params...)
-    else
-        argnametag = Stype
-        params = []
-        gensymd_struct_params = []
-        gensymd_Stype = Stype
-    end
-
-    # Collect all typevars from our pattern
-    # and all the remaining ones from the struct definition
-    forwardtvs = []
-    tvsyms = []
-    for sig in forwardsig
-        sig isa UnionAll || continue
-        tvs = Base.unwrap_unionall(sig).parameters
-        for tv in tvs
-            !isa(tv, TypeVar) && continue
-            push!(tvsyms, tv.name)
-            push!(forwardtvs, TypeVar(Symbol("#", tv.name), tv.lb, tv.ub))
-        end
-    end
-    for p in params
-        p ∈ tvsyms && continue
-        push!(forwardtvs, TypeVar(Symbol("#", p)))
-    end
 
     methods_to_generate = []
     for (m, swap_positions) in allmethods
@@ -265,7 +276,7 @@ function forward(_module_, @nospecialize(T), @nospecialize(S), @nospecialize(M))
         for positions in combinations(swap_positions)
             ranges_overlap_pairwise(sort!(positions)) && continue
 
-            argnameswaps = [gensym(argnametag) for _ in 1:length(positions)]
+            argnameswaps = [gensym(structbasename) for _ in 1:length(positions)]
             argtypesswaps = fill(gensymd_Stype, length(positions))
 
             newargnames = swapat(argnames, positions, argnameswaps)
@@ -275,14 +286,14 @@ function forward(_module_, @nospecialize(T), @nospecialize(S), @nospecialize(M))
             # @info concretesig
             # returntype = Base.infer_return_type(getfield(m.module, m.name), Tuple(concretesig))
             # @warn m concretesig returntype
-
+            # @info newargnames
             newdecl = zip(newargnames, newargtypes)
 
             # filter the tv to remove the typevars we substituted
             filtered_method_tvs = filter(tvar -> tvar.name in newargtypes, tv)
-            newtv = [forwardtvs; filtered_method_tvs]
+            newtv = [filtered_method_tvs; values(forwardtvs)...]
 
-            methodforwardcall = generate_forward_call(m, Stype, newdecl, evaldpairs)
+            methodforwardcall = generate_forward_call(m, gensymd_Stype, newdecl, evaldpairs)
             methodforwardcall == Symbol("#skip#") && continue
             newsignature = generate_signature(m, newdecl, newtv)
 
@@ -294,7 +305,6 @@ function forward(_module_, @nospecialize(T), @nospecialize(S), @nospecialize(M))
     retblk = Expr(:block)
     push!(retblk.args, S)
     for gm in methods_to_generate
-
         push!(retblk.args, gm)
     end
     @info "All methods" methods_to_generate
@@ -327,6 +337,9 @@ function swapat(base, positions, swaps)
 
     return swapped
 end
+
+setdefaultpush!(dict, element, key, default=[]) =
+    setindex!(dict, push!(get(dict, key, default), element), key)
 
 function typevar_to_ast(tv)
     if tv.lb == Union{} && tv.ub != Any

@@ -310,17 +310,38 @@ mtest(::HasNoDefault, ::String) = "hasnodefault"
     @test_throws MethodError mtest(HasNoDefault(10), w)
 end
 
-# parametric forwarding
-@forward Array{T,N} where {T,N},
-struct MyArray{T,N} #<: AbstractArray{T, N}
-    a::Array{T,N}
-    some_attr::Int
-    MyArray(T, dims::NTuple{N,Int}) where {N} = new{T,N}(zeros(T, dims...), 1)
-end, (Base.show, Base.size)
+@testset "Parametric Forwarding" begin
+    # parametric forwarding
+    @forward Array{T,N} where {T<:Integer,N},
+    struct MyArray{T,N} #<: AbstractArray{T, N}
+        a::Array{T,N}
+        some_attr::Int
+        MyArray(T, dims::NTuple{N,Int}) where {N} = new{T,N}(zeros(T, dims...), 1)
+    end, (Base.show, Base.size)
 
-a = MyArray(Float64, (2, 2, 2))
-@show size(a)
+    afloat = MyArray(Float64, (2, 2, 2))
+    aint = MyArray(Int, (2, 2, 2))
+    @test size(aint) == (2, 2, 2)
+    @test_throws MethodError size(afloat)
+end
 
+mtest(v::Array{T,N}, w::Array{T,N}) where {T,N} = 42
+@testset "Splat Parametric Forwarding" begin
+    @forward {
+        Array{T,N} where {T<:Float64,N},
+        Array{T,N} where {T<:Int,N}
+    },
+    struct MultiTest{T,N}
+        a::Array{T,N}
+        b::Array{T,N}
+    end
+
+    mt_join = MultiTest{Real,1}([1, 2, 3], [1.0, 2.0, 3.0])
+    mt_cmpl = MultiTest{ComplexF32,1}(ComplexF32[1, 2, 3], ComplexF32[1, 2, 3])
+
+    @test mtest(mt_join) == 42
+    @test_throws MethodError mtest(mt_cmpl)
+end
 
 
 
