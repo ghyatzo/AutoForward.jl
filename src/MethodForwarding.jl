@@ -193,8 +193,7 @@ function forward(_module_, @nospecialize(T), @nospecialize(S), @nospecialize(M))
         tvs = Base.unwrap_unionall(sig).parameters
         for tv in tvs
             !isa(tv, TypeVar) && continue
-            setdefaultpush!(forwardtvs, TypeVar(Symbol("#", tv.name), tv.lb, tv.ub), tv.name)
-            # setindex!(forwardtvs, push!(get(forwardtvs, tv.name, []), TypeVar(Symbol("#", tv.name), tv.lb, tv.ub)), tv.name)
+            push!(get!(forwardtvs, tv.name, []), TypeVar(Symbol("#", tv.name), tv.lb, tv.ub))
         end
     end
     # in case we have multiple tvs with the same name, we want to coalesce them
@@ -339,7 +338,7 @@ function swapat(base, positions, swaps)
 end
 
 setdefaultpush!(dict, element, key, default=[]) =
-    setindex!(dict, push!(get(dict, key, default), element), key)
+    push!(get!(dict, key, default), element)
 
 function typevar_to_ast(tv)
     if tv.lb == Union{} && tv.ub != Any
@@ -354,10 +353,16 @@ function typevar_to_ast(tv)
     return ex
 end
 
+kwexpr() = Expr(:parameters, :(kw...))
+
+
 function generate_signature(method, decl, typevars=[])
     mmodule = method.module
     mname = method.name
     mexpr = Expr(:call, :($mmodule.$mname))
+    if !isempty(Base.kwarg_decl(method))
+        push!(mexpr.args, kwexpr())
+    end
     for (argn, argt) in decl
         ex = argn == Symbol("#unused#") || argn == Symbol("") ?
              Expr(:(::), argt) : Expr(:(::), argn, argt)
@@ -377,6 +382,9 @@ function generate_forward_call(method, forward_t, decl, derivepairs)
     mmodule = method.module
     mname = method.name
     mexpr = Expr(:call, :($mmodule.$mname))
+    if !isempty(Base.kwarg_decl(method))
+        push!(mexpr.args, kwexpr())
+    end
     fields = last.(derivepairs)
     for (argn, argt) in decl
         if argt == forward_t

@@ -15,9 +15,9 @@ ToDo:
 
 - [x] Single Parametric types in patterns
 	(i.e: `@forward Array{T, N} where {T,N} struct ...`)
-- [ ] Multiple Parametric types in patterns
+- [x] Multiple Parametric types in patterns
 	(i.e.: `@forward {Vector{T} where T <: Integer, Vector{N} where N <: Float64}`)
-- [ ] Keyword arguments forwarding
+- [x] Keyword arguments forwarding
 - [ ] Explore "rewrapping" behaviour
 - [ ] Add a "dry run" mode
 

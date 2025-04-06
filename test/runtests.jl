@@ -343,6 +343,17 @@ mtest(v::Array{T,N}, w::Array{T,N}) where {T,N} = 42
     @test_throws MethodError mtest(mt_cmpl)
 end
 
+kwtest(a::Int; b) = a + b
+@testset "Kwargs handling" begin
+    @forward Int struct KWWrapper
+        x::Int
+    end kwtest
+
+    w = KWWrapper(1)
+
+    @test kwtest(w; b=1) == 2
+end
+
 
 
 
